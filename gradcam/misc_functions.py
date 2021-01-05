@@ -209,9 +209,9 @@ def params_for_yolo():
     similar to `get_example_params()`
     """
     target_class = 1
-    file_name_to_export = "laptop" # this is the class name you're predicting
+    file_name_to_export = "person" # this is the class name you're predicting
 
-    dataset = LoadImages("data/samples/", img_size = 416, half = True)
+    dataset = LoadImages("../input_images/", img_size = 416)
     for i, data in enumerate(dataset):
         prep_img = data[1]
         original_image = data[2]
