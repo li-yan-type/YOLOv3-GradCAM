@@ -1,3 +1,5 @@
+import os
+os.environ["KMP_DUPLICATE_LIB_OK"]="TRUE"
 import numpy as np
 import torch
 import torch.nn.functional as F
@@ -8,7 +10,7 @@ from PIL import Image
 from matplotlib.lines import Line2D
 
 from models import *
-from misc_functions import *
+from visualization.misc_functions import *
 
 import matplotlib
 matplotlib.use("TkAgg")
@@ -21,6 +23,8 @@ def plot_grad_flow(named_params):
             layers.append(n)
             if p.grad is not None:
                 ave_grads.append(p.grad.abs().mean())
+            else:
+                ave_grads.append(p.grad)
     plt.plot(ave_grads, alpha=0.3, color="b")
     plt.hlines(0, 0, len(ave_grads) + 1, linewidth = 1, color="k")
     plt.xticks(range(0, len(ave_grads), 1), layers, rotation="vertical")
@@ -69,16 +73,17 @@ class CamExtractor():
     def forward_pass_on_convolutions(self, x):
         layer_outputs = []
         output = []
-
+        a = []
         conv_output = None
         x = x.float()
 
         for i, (mdef, module) in enumerate(zip(self.model.module_defs, self.model.module_list)):
             mtype = mdef["type"]
+            a.append(mtype)
             if mtype in ["convolutional", "upsample", "maxpool"]:
                     x = module(x)
             elif mtype == "route":
-                layers = [int(x) for x in mdef["layers"].split(",")]
+                layers = [int(x) for x in mdef["layers"]]
                 if len(layers) == 1:
                     x = layer_outputs[layers[0]]
                 else:
@@ -88,11 +93,12 @@ class CamExtractor():
                         layer_outputs[layers[1]] = F.interpolate(layer_outputs[layers[1]], scale_factor=[0.5, 0.5])
                         x = torch.cat([layer_outputs[i] for i in layers], 1)
             elif mtype == "shortcut":
-                x = x + layer_outputs[int(mdef["from"])]
+                t = mdef["from"][0]
+                x = layer_outputs[-1] + layer_outputs[t]
             elif mtype == "yolo":
                 x = module(x, (416, 416))
                 output.append(x)
-            layer_outputs.append(x if i in self.model.routs else [])
+            layer_outputs.append(x)
 
             if i == self.target_layer:
                 x.register_hook(self.save_gradient)
@@ -138,8 +144,8 @@ class GradCam():
 
         # backward pass with specified target
         model_output.backward(gradient = one_hot_output, retain_graph = True)
-        plot_grad_flow(self.model.named_parameters())
-        plot_grad_flow_v2(self.model.named_parameters())
+        # plot_grad_flow(self.model.named_parameters())
+        # plot_grad_flow_v2(self.model.named_parameters())
 
         # get hooked gradients
         guided_gradients = self.extractor.gradients.cpu().data.numpy()[0]
@@ -166,9 +172,9 @@ class GradCam():
 if __name__ == '__main__':
     original_image, prep_img, target_class, file_name_to_export = params_for_yolo()
 
-    model = Darknet("cfg/yolov3_transfer.cfg", 416)
-    model.load_state_dict(torch.load("weights/yoloweights.pt", map_location = "cuda:0")["model"])
-
+    model = Darknet("../cfg/yolov3.cfg", 416)
+    model.load_state_dict(torch.load("../weights/yolov3.pt", map_location = "cuda:0")["model"])
+    # load_darknet_weights(model, "../weights/yolov3.weights")
     prep_img = torch.from_numpy(prep_img).to("cuda:0")
 
     if prep_img.ndimension() == 3:
@@ -176,6 +182,7 @@ if __name__ == '__main__':
 
     grad_cam = GradCam(model, target_layer = 42)
     cam = grad_cam.generate_cam(prep_img, target_class)
+    #original_images要变成416 × 416 × 3
     original_image = Image.fromarray(original_image.astype("uint8"))
     save_class_activation_images(original_image, cam, file_name_to_export)
 
